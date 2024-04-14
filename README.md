@@ -1,2 +1,2 @@
 # thesis_p10-scRNA-seq
-Analyses of scRNA-seq data for aIP and OP-derived SPNs during neural circuit assembly.
+Repository hosts the analysis code for P10 scRNA-seq data of aIP and OP-derived SPNs.
