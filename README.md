@@ -7,7 +7,7 @@ Pipeline:
   - Creates seurat objects from Cell Ranger outputs
   - Uses SoupX to remove RNA contam. and updates count matrices
 
-  2. Filtering
+  2. Filtering & Normalisation
    - Removes low quality cells
    - Scores cell cycle
    - Runs SCTransform 
