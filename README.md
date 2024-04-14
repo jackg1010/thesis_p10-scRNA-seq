@@ -12,7 +12,6 @@ Pipeline:
    - Scores cell cycle
    - Runs SCTransform 
    - Removes doublets 
-   - Plots qc metrics
 
   3. Cell Type Annotation
    - Annotates cell types w/ Saunders 2018 data
@@ -23,6 +22,7 @@ Pipeline:
   4. Dataset Integration
    - Removes non-neuronal cells from both objects
    - Integrates GFP and RFP seurat objects
+   - Plots QC metrics
    - Runs integrated dimensionality reduction and clustering
 
   5. Differential Expression
