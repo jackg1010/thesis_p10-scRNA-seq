@@ -1,0 +1,78 @@
+---
+title: "1.Processing"
+author: "Jack Gordon"
+date: "2024-04-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/jackgordon/Documents/DPhil/RNA-Sequencing/P10-seq")
+```
+
+Creates seurat objects from 10X data for two RFP and GFP+ P10 SPNs datasets.\
+Uses SoupX to remove ambient RNA contamination.
+
+### 1. Processing
+```{r, Processing, message = FALSE, warning= FALSE}
+library(Seurat)
+library(SeuratDisk)
+library(DropletUtils)
+library(SoupX)
+
+#Function create.seurat - 
+  # Reads in the data fro CellRange and creates a seurat object 
+  # Demultiplex with sample ID stored in MUTLI_ID column
+
+create.seurat <- function(directory) {
+  data <- Read10X(data.dir = directory) #Read in data
+  seurat <- CreateSeuratObject(counts = data$`Gene Expression`) #Create seurat object with counts
+  seurat[["HTO"]] <- CreateAssayObject(counts = data$`Antibody Capture`) #Add antibidoy tags as an assay
+  seurat <- NormalizeData(seurat, assay = "HTO", normalization.method = "CLR") #Normalise antibody tags
+  seurat <- MULTIseqDemux(object = seurat, assay = "HTO", 
+                          autoThresh = TRUE, maxiter = 20) #Perform demulitplexing
+  seurat <- SetIdent(seurat, value = "orig.ident")
+  seurat[["percent.mt"]] <- PercentageFeatureSet(seurat, pattern = "^mt-")
+  seurat[["percent.rb"]] <- PercentageFeatureSet(seurat, pattern = "^Rp[ls]")
+  return(seurat) #Return seurat object
+}
+
+#Create rfp seurat object
+rfp.dir <- "raw.data/TEL002/deep.seq/outs/filtered_feature_bc_matrix"
+rfp.seurat <- create.seurat(rfp.dir)
+
+#Use SoupX to remove ambient RNA
+rfp.sc = load10X("raw.data/TEL002/deep.seq/outs") #Load in 10X output for RFP
+rfp.sc = autoEstCont(rfp.sc) #Load in 10X output for RFP
+rfp.out = adjustCounts(rfp.sc) #Load in 10X output for RFP
+
+#Update seurat object with SoupX cleaned count matrix and save
+rfp.seurat[["RNA"]]$counts <- rfp.out
+saveRDS(rfp.seurat, "data/unfiltered.rfp.seurat.rds")
+
+#Create gfp seurat object
+gfp.dir <- "raw.data/TEL001/deep.seq/outs/filtered_feature_bc_matrix"
+gfp.seurat <- create.seurat(gfp.dir)
+
+#Use SoupX to remove ambient RNA
+gfp.sc = load10X("raw.data/TEL001/deep.seq/outs") #Load in 10X output for GFP
+gfp.sc = setContaminationFraction(gfp.sc, 0.14) #Set from RFP soup channel
+gfp.out = adjustCounts(gfp.sc) #Load in 10X output for RFP
+
+#Update seurat object with SoupX cleaned count matrix and save
+gfp.seurat[["RNA"]]$counts <- gfp.out
+saveRDS(gfp.seurat, "data/unfiltered.gfp.seurat.rds")
+```
+
+Plot fraction of reads removed per cell for various markers
+
+```{r soupX.plot, message=FALSE, warning=FALSE}
+plotChangeMap(rfp.sc, rfp.out, "Gja1")
+plotChangeMap(rfp.sc, rfp.out, "Olig1")
+plotChangeMap(rfp.sc, rfp.out, "Snap25")
+```
+
+
+```{r sessionInfo}
+sessionInfo()
+```

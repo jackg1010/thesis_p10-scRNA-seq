@@ -1,0 +1,148 @@
+---
+title: "7.Pseudotime"
+author: "Jack Gordon"
+date: "2024-04-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/jackgordon/Documents/DPhil/RNA-Sequencing/P10-seq")
+```
+
+Uses Monocle3 to construct pseudo-time trajectory from dividing neurogenesis cells.\
+Assigns integrated Seurat object UMAP and clusters to Monocle object.
+Plots expression of Sox4 and Foxp1 over pseudo-time.
+Plots distribution of aIP and OP-derived cells along pseudo-time.
+
+### 7. Pseudo-time
+```{r, pseudotime, message = FALSE, warning= FALSE}
+#Load libraries
+library(Seurat)
+library(SeuratWrappers)
+library(monocle3)
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+
+#Set seed
+set.seed(13)
+
+#Load in integrated seurat
+integrated.seurat <- readRDS("data/integrated.seurat.rds")
+
+#Visualise clustering and expression of markers
+#Visualise UMAP of clusters - find Mki67+ root clusters
+#Cluster no4 is root in SCT_snn_res.0.8
+DefaultAssay(integrated.seurat) <- "SCT"
+
+FeaturePlot(integrated.seurat, features = c("Sox4", "Mki67", "Snap25", "Foxp1"))
+
+DimPlot(integrated.seurat, group.by = c("class")) 
+
+DimPlot(integrated.seurat, group.by = c("Phase"))
+
+#Set idents to SCT clusters 
+Idents(integrated.seurat) <- "SCT_snn_res.0.8"
+
+#Convert integrated seurat object into monocle object
+cds <- SeuratWrappers::as.cell_data_set(integrated.seurat)
+
+#Update rowdata in integrated object
+fData(cds)$gene_short_name <- rownames(fData(cds))
+head(fData(cds))
+
+#Assign partitions to cds object set all cells as 1st partition
+recreate.partitions <- c(rep(1, length(cds@colData@rownames)))
+names(recreate.partitions) <- cds@colData@rownames
+recreate.partitions <- as.factor(recreate.partitions)
+cds@clusters@listData[["UMAP"]][["partitions"]] <- recreate.partitions
+
+#Manually add clustering and UMAP info to monocle object - clusters, co-ordinates
+list.cluster <- integrated.seurat@active.ident
+cds@clusters@listData[["UMAP"]][["clusters"]] <- list.cluster
+cds@int_colData@listData[["reducedDims"]]@listData[["UMAP"]] <- 
+integrated.seurat@reductions$umap@cell.embeddings
+
+#Plot pre.trajectory
+cluster.before.traj <-plot_cells(cds, color_cells_by = "cluster", 
+                                 label_groups_by_cluster = F, 
+                                 group_label_size = 5) + 
+  theme(legend.position = "right")
+
+#Learn trajectory and plot
+cds <- learn_graph(cds, use_partition = F)
+
+plot_cells(cds, color_cells_by = "cluster", label_groups_by_cluster = F,
+           label_branch_points = T, label_roots = T, label_leaves = F,
+           group_label_size = 5)
+
+#Order cells in pseudo-time
+cds <- order_cells(cds, reduction_method = "UMAP", 
+                  root_cells = colnames(cds[, clusters(cds) == 4]))
+plot_cells(cds, color_cells_by = "pseudotime", label_groups_by_cluster = T,
+           label_branch_points = F, label_roots = F, label_leaves = F)
+
+#Plot pseudo-time for neurogenesis vs. neuronal cells
+cds$monocle3_pseudotime <- pseudotime(cds)
+data.pseudo <- as.data.frame(colData(cds))
+
+ggbarplot(data = data.pseudo, 
+                x = "class", y = "monocle3_pseudotime", 
+                color = "black", fill = "class",
+                order = c("NEUROGENESIS", "NEURON"),
+                add = "mean_se",
+                error.plot = "upper_errorbar", 
+                add.params = list(color = "black", alpha = 0.5)) +
+  theme(legend.position = "none") + xlab(NULL) + ylab("pseudotime") +
+  stat_compare_means(method = "wilcox", label = "p.signif")
+```
+
+```{r, deg, message = FALSE, warning= FALSE, results = "hide"} 
+#Find genes that vary as a function of pseudotime - show top 10
+deg <- graph_test(cds, neighbor_graph = "principal_graph")
+deg %>% arrange(q_value) %>% filter(status == "OK") %>% 
+  filter(q_value < 0.05) %>% head(10)
+```
+
+```{r, pseudotime two, message = FALSE, warning= FALSE}
+#Subset for selected genes and plot change over pseudotime
+cds <- estimate_size_factors(cds) #Scale expression
+
+my_genes <- row.names(subset(fData(cds), 
+                             gene_short_name %in% c("Sox4", "Foxp1")))
+cds_subset <- cds[my_genes,]
+
+plot_genes_in_pseudotime(cds_subset, cell_size = 0.1,
+                              vertical_jitter = 0.5) + 
+  theme(legend.position = "none") + ylab("Expression") 
+
+#Add pseudotime as metadata column to seurat object
+integrated.seurat$pseudotime <- pseudotime(cds)
+saveRDS(integrated.seurat, "data/integrated.seurat")
+
+#Comparisons of aIP and OP-derived pseudo-time
+my.comparisons <- list(c("aIP-derived", "OP-derived"))
+meta <- integrated.seurat@meta.data
+meta$pseudotime <- as.numeric(meta$pseudotime)
+meta$progenitor.origin <- as.factor(meta$progenitor.origin)
+
+#Calculate results
+pseudo.res <- meta %>% select(progenitor.origin, pseudotime) %>%
+group_by(progenitor.origin) %>% 
+  summarise(mean = mean(pseudotime), 
+  sem = plotrix::std.error(pseudotime), 
+  median = median(pseudotime), mad = mad(pseudotime))
+
+
+ggdensity(meta, x = "pseudotime",
+          color = "progenitor.origin", fill = "progenitor.origin", 
+          palette = c("forestgreen", "firebrick3"), 
+          add = "mean", add.params = list(size = 1.5, linetype = "dashed"), rug = TRUE) +
+  ylab("Density") 
+```
+
+```{r sessionInfo, message = FALSE, warning = FALSE}
+sessionInfo()
+```
+
